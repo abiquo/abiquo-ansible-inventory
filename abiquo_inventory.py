@@ -47,8 +47,6 @@ try:
 except ImportError:
     import simplejson as json
 
-import pdb
-
 class AbiquoInventory(object):
     def _empty_inventory(self):
         return {"_meta": {"hostvars": {}}}
@@ -442,6 +440,7 @@ class AbiquoInventory(object):
                     self.update_vm_metadata(vm)
 
                 host_vars = self.vars_from_json(vm.json)
+                dest = ""
 
                 hw_profile = ''
                 for link in vm.links:
@@ -507,45 +506,54 @@ class AbiquoInventory(object):
                 loadbalancer_names = self.get_vm_loadbalancer_names(vm)
 
                 ## Set host vars
-                inventory['_meta']['hostvars'][vm_nic] = host_vars
+                if 'fqdn' in vm.json:
+                    dest = vm.fqdn
+                elif 'label' in vm.json:
+                    dest = vm.label.replace('[','').replace(']','').replace(' ','_')
+                else:
+                    dest = vm.name.replace('[','').replace(']','').replace(' ','_')
+
+                host_vars['ansible_host'] = vm_nic
+                host_vars['ansible_user'] = vm.template['loginUser'] if 'loginUser' in vm.template else ''
+                inventory['_meta']['hostvars'][dest] = host_vars
 
                 ## Start with groupings
 
                 # VM name
                 if vm.name not in inventory:
                     inventory[vm.name] = []
-                inventory[vm.name].append(vm_nic)
+                inventory[vm.name].append(dest)
 
                 # VM template
                 vm_tmpl = "template_%s" % vm_template
                 if vm_tmpl not in inventory:
                     inventory[vm_tmpl] = []
-                inventory[vm_tmpl].append(vm_nic)
+                inventory[vm_tmpl].append(dest)
 
                 # vApp
                 vapp = "vapp_%s" % vm_vapp
                 if vapp not in inventory:
                     inventory[vapp] = []
-                inventory[vapp].append(vm_nic)
+                inventory[vapp].append(dest)
 
                 # VDC
                 vdc = "vdc_%s" % vm_vdc
                 if vdc not in inventory:
                     inventory[vdc] = []
-                inventory[vdc].append(vm_nic)
+                inventory[vdc].append(dest)
 
                 # VDC_vApp
                 vdcvapp = 'vdc_%s_vapp_%s' % (vm_vdc, vm_vapp)
                 if vdcvapp not in inventory:
                     inventory[vdcvapp] = []
-                inventory[vdcvapp].append(vm_nic)
+                inventory[vdcvapp].append(dest)
 
                 # HW profiles
                 if hw_profile != '':
                     hwprof = 'hwprof_%s' % hw_profile
                     if hwprof not in inventory:
                         inventory[hwprof] = []
-                    inventory[hwprof].append(vm_nic)
+                    inventory[hwprof].append(dest)
 
                 # VM variables
                 if 'variables' in vm.json:
@@ -555,7 +563,7 @@ class AbiquoInventory(object):
                         vargroup = "var_%s_%s" % (var_sane, val_sane)
                         if vargroup not in inventory:
                             inventory[vargroup] = []
-                        inventory[vargroup].append(vm_nic)
+                        inventory[vargroup].append(dest)
                 
                 # Networks names
                 for name in network_names:
@@ -563,7 +571,7 @@ class AbiquoInventory(object):
                     net_key = "network_%s" % name_sane
                     if net_key not in inventory:
                         inventory[net_key] = []
-                    inventory[net_key].append(vm_nic)
+                    inventory[net_key].append(dest)
 
                 # DS Tier names
                 for name in ds_tier_names:
@@ -571,7 +579,7 @@ class AbiquoInventory(object):
                     tier_key = "dstier_%s" % name_sane
                     if tier_key not in inventory:
                         inventory[tier_key] = []
-                    inventory[tier_key].append(vm_nic)
+                    inventory[tier_key].append(dest)
                 
                 # Firewall names
                 for name in firewall_names:
@@ -579,7 +587,7 @@ class AbiquoInventory(object):
                     fw_key = "firewall_%s" % name_sane
                     if fw_key not in inventory:
                         inventory[fw_key] = []
-                    inventory[fw_key].append(vm_nic)
+                    inventory[fw_key].append(dest)
 
                 # Loadbalancer names
                 for name in loadbalancer_names:
@@ -587,7 +595,7 @@ class AbiquoInventory(object):
                     lb_key = "loadbalancer_%s" % name_sane
                     if lb_key not in inventory:
                         inventory[lb_key] = []
-                    inventory[lb_key].append(vm_nic)
+                    inventory[lb_key].append(dest)
 
             return inventory
         except Exception:
