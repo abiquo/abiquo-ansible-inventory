@@ -24,17 +24,14 @@ import copy
 import sys
 import traceback
 import time
-import requests
 import argparse
 import urllib3
-import httplib as http_client
 from abiquo.client import Abiquo, check_response
 from requests_oauthlib import OAuth1
-from os.path import expanduser
 
 try:
     import ConfigParser # py2
-except ImportError:
+except ModuleNotFoundError:
     import configparser # py3
 
 try:
@@ -98,11 +95,11 @@ class AbiquoInventory(object):
         try:
             os.stat(configfilename)
 
-            config = ConfigParser.SafeConfigParser()
+            config = configparser.ConfigParser()
             config.read(configfilename)
             self.config = config
         except:
-            self.config = ConfigParser.SafeConfigParser()
+            self.config = configparser.ConfigParser()
 
     def init_client(self):
         api_url = self.config_get('api', 'uri')
@@ -365,7 +362,7 @@ class AbiquoInventory(object):
                 if key != 'links':
                     nic_dict["%s_%s" % (nic_rel, key)] = nic[key]
 
-            netlink = filter(lambda x: "network" in x['rel'], nic['links'])
+            netlink = list(filter(lambda x: "network" in x['rel'], nic['links']))
             if len(netlink) > 0:
                 netlink = netlink[0]
                 nic_dict["%s_net_type" % nic_rel] = netlink['rel']
@@ -382,7 +379,7 @@ class AbiquoInventory(object):
                 if key != 'links':
                     disk_dict["%s_%s" % (disk_rel, key)] = disk[key]
 
-            tierlink = filter(lambda x: "tier" in x['rel'], disk['links'])
+            tierlink = list(filter(lambda x: "tier" in x['rel'], disk['links']))
             if len(tierlink) > 0:
                 tierlink = tierlink[0]
                 disk_dict["%s_tier" % disk_rel] = tierlink['title']
@@ -397,7 +394,7 @@ class AbiquoInventory(object):
         nics_dict = self.nic_json_to_dict(vm['nics'])
         disks_dict = self.disk_json_to_dict(vm['disks'])
 
-        host_vars = dict(nics_dict.items() + disks_dict.items())
+        host_vars = dict(list(nics_dict.items()) + list(disks_dict.items()))
 
         link_rels = [
             "category", "virtualmachinetemplate", "hypervisortype", "ip", "location", "hardwareprofile",
@@ -406,7 +403,7 @@ class AbiquoInventory(object):
         vm_links = copy.copy(vm['links'])
         link_dict = {}
         for rel in link_rels:
-            links = filter(lambda y: y['rel'] == rel, vm_links)
+            links = list(filter(lambda y: y['rel'] == rel, vm_links))
             if len(links) > 0:
                 link = links[0]
                 k = link['rel']
@@ -418,12 +415,13 @@ class AbiquoInventory(object):
         del attrs_dict['nics']
         del attrs_dict['disks']
 
-        d = dict(host_vars.items() + link_dict.items() + attrs_dict.items())
-        for i in d:
-            if not i.startswith('abq'):
-                d['abq_%s' % i] = d.pop(i)
+        d = dict(list(host_vars.items()) + list(link_dict.items()) + list(attrs_dict.items()))
+        vars = {}
+        for i, v in d.items():
+            if i.startswith('abq'):
+                vars['abq_%s' % i] = v
 
-        return d
+        return vars
 
     def generate_inv_from_api(self):
         inventory = self.inventory
@@ -440,7 +438,6 @@ class AbiquoInventory(object):
                     self.update_vm_metadata(vm)
 
                 host_vars = self.vars_from_json(vm.json)
-                dest = ""
 
                 hw_profile = ''
                 for link in vm.links:
@@ -458,25 +455,22 @@ class AbiquoInventory(object):
                 if not public_ip_only:
                     public_ip_only = config.getboolean('defaults', 'public_ip_only') if config.has_option('defaults', 'public_ip_only') else False
 
-                if public_ip_only:
-                    for link in vm.links:
-                        if (link['type']=='application/vnd.abiquo.publicip+json' and link['rel']=='ip'):
-                            vm_nic = link['title']
-                            break
-                        else:
-                            vm_nic = None
-                # Otherwise, assigning defined network interface IP address
-                else:
-                    default_net_iface = os.environ.get("ABIQUO_INV_DEFAULT_IFACE")
-                    if not default_net_iface:
-                        default_net_iface = config.get('defaults', 'default_net_interface') if config.has_option('defaults', 'default_net_interface') else "nic0"
+                default_net_iface = os.environ.get("ABIQUO_INV_DEFAULT_IFACE")
+                if not default_net_iface:
+                    default_net_iface = config.get('defaults', 'default_net_interface') if config.has_option('defaults', 'default_net_interface') else "nic0"
 
-                    for link in vm.links:
-                        if link['rel'] == default_net_iface:
-                            vm_nic = link['title']
-                            break
+                vm_nic = None
+                for nic in vm.nics:
+                    for link in nic['links']:
+                        if public_ip_only:
+                            if link['type'] == 'application/vnd.abiquo.publicip+json' and link['rel']== 'ip':
+                                vm_nic = link['title']
+                                break
+                        # Otherwise, assigning defined network interface IP address
                         else:
-                            vm_nic = None
+                            if link['rel'] == default_net_iface:
+                                vm_nic = link['title']
+                                break
 
                 if vm_nic is None:
                     continue

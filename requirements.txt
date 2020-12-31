@@ -1,1 +1,4 @@
 abiquo-api==0.1.14
+ConfigParser
+requests_oauthlib
+httplib
