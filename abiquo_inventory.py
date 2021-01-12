@@ -225,7 +225,19 @@ class AbiquoInventory(object):
             pass # not really sure what to do here
 
     def get_vms(self):
-        code, vms = self.api.cloud.virtualmachines.get(headers={'accept':'application/vnd.abiquo.virtualmachines+json'})
+        code, vms = self.api.cloud.virtualmachines.get(
+            headers={'accept': 'application/vnd.abiquo.virtualmachines+json'}
+        )
+        try:
+            check_response(200, code, vms)
+        except Exception as e:
+            self.fail_with_error(e)
+        return vms
+
+    def get_vms_by_vdc(self, vdc:str):
+        code, vms = self.api.cloud.virtualdatacenters(vdc).action.virtualmachines.get(
+            headers={'accept': 'application/vnd.abiquo.virtualmachines+json'}
+        )
         try:
             check_response(200, code, vms)
         except Exception as e:
@@ -249,7 +261,6 @@ class AbiquoInventory(object):
     def update_vm_disks_and_nics(self, vm):
         vm_nics = []
         vm_disks = []
-        vm_vols = []
         nics = self.get_vm_nics(vm)
         disks = self.get_vm_disks(vm)
         vols = self.get_vm_volumes(vm)
@@ -423,17 +434,33 @@ class AbiquoInventory(object):
 
         return vars
 
+    def find_config_value(self, env_variable_name: str, config_variable_name: str):
+        config_value = os.environ.get(env_variable_name)
+        if not config_value:
+            config_value = self.config.get('defaults', config_variable_name) if self.config.has_option('defaults', config_variable_name) else False
+
+        return config_value
+
+    def find_boolean_config_value(self, env_variable_name: str, config_variable_name: str):
+        config_value = os.environ.get(env_variable_name)
+        if not config_value:
+            config_value = self.config.getboolean('defaults', config_variable_name) if self.config.has_option('defaults', config_variable_name) else False
+
+        return config_value
+
     def generate_inv_from_api(self):
         inventory = self.inventory
         try:
-            vms = self.get_vms()
-            config = self.config
+            vdc_id = self.find_config_value("ABIQUO_INV_VDC", "vdc")
+            if vdc_id:
+                vms = self.get_vms_by_vdc(vdc_id)
+            else:
+                vms = self.get_vms()
+
             for vm in vms:
                 self.update_vm_disks_and_nics(vm)
                 self.update_vm_template(vm)
-                get_md = os.environ.get("ABIQUO_INV_GET_METADATA")
-                if not get_md:
-                    get_md = config.getboolean('defaults', 'get_metadata') if config.has_option('defaults', 'get_metadata') else False
+                get_md = self.find_boolean_config_value("ABIQUO_INV_GET_METADATA", "get_metadata")
                 if get_md:
                     self.update_vm_metadata(vm)
 
@@ -451,13 +478,8 @@ class AbiquoInventory(object):
                         hw_profile = link['title'].replace('[','').replace(']','').replace(' ','_')
 
                 # From abiquo.ini: Only adding to inventory VMs with public IP
-                public_ip_only = os.environ.get("ABIQUO_INV_PUBLIC_IP_ONLY")
-                if not public_ip_only:
-                    public_ip_only = config.getboolean('defaults', 'public_ip_only') if config.has_option('defaults', 'public_ip_only') else False
-
-                default_net_iface = os.environ.get("ABIQUO_INV_DEFAULT_IFACE")
-                if not default_net_iface:
-                    default_net_iface = config.get('defaults', 'default_net_interface') if config.has_option('defaults', 'default_net_interface') else "nic0"
+                public_ip_only = self.find_boolean_config_value("ABIQUO_INV_PUBLIC_IP_ONLY", "public_ip_only")
+                default_net_iface= self.find_config_value("ABIQUO_INV_DEFAULT_IFACE", "default_net_interface")
 
                 vm_nic = None
                 for nic in vm.nics:
@@ -477,10 +499,7 @@ class AbiquoInventory(object):
 
                 vm_state = True
                 # From abiquo.ini: Only adding to inventory VMs deployed
-                deployed_only = os.environ.get("ABIQUO_INV_DEPLOYED_ONLY")
-                if not deployed_only:
-                    deployed_only = config.getboolean('defaults', 'deployed_only') if config.has_option('defaults', 'deployed_only') else True
-
+                deployed_only = self.find_boolean_config_value("ABIQUO_INV_DEPLOYED_ONLY", "deployed_only")
                 if deployed_only and vm.state == 'NOT_ALLOCATED':
                     vm_state = False
 
